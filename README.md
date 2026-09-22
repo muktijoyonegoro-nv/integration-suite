@@ -103,6 +103,7 @@ podman:
     kafka: "confluentinc/confluent-local:7.6.0"
     redis: "redis:7-alpine"
     wiremock: "docker.io/wiremock/wiremock:3.5.2"
+    flyway: "docker.io/flyway/flyway:11-alpine"
 ```
 
 ### 2. Local Application Services (`.env`)
@@ -151,8 +152,8 @@ integration-suite/
 │   │   ├── environment.go           # Managed runtime environment & teardown
 │   │   ├── podman.go                # Podman socket resolution
 │   │   └── prune.go                 # Safe container pruning targeting harness labels
-│   └── testutil/                    # Reusable DB schema init/truncation, Kafka, Redis, and WireMock helpers
-│       ├── db.go                    # MySQL connection, schema creation, query helpers
+│   └── testutil/                    # Reusable DB connection/truncation, Kafka, Redis, and WireMock helpers
+│       ├── db.go                    # MySQL connection, table truncation, query helpers
 │       ├── kafka.go                 # Topic creation, proto reader/writer
 │       ├── mock_aaa.go              # WireMock AAA token authentication stubs
 │       └── redis.go                 # Redis flush and cache query helpers
@@ -182,6 +183,7 @@ integration-suite/
 4. **No Host Port Collisions**: Dynamic ephemeral host ports are allocated at container startup. Tests resolve endpoints dynamically via harness helpers (`scenario.DB()`, `scenario.KafkaBroker()`, `scenario.Endpoint("service")`), allowing tests to run reliably in parallel without port conflicts.
 5. **Dev-Time Protobufs**: Protobuf compilation is decoupled from test execution (`make proto-gen`). Tests run instantly without runtime tool dependencies on `protoc` or `protoc-gen-go`.
 6. **Deterministic State Isolation**: Tests truncate databases and flush Redis caches before/after runs, avoiding state leakage between test executions.
+7. **Automated Production Migrations (Flyway)**: Real migration scripts (`resources/db/migration`) are mounted directly from each microservice's checkout and applied via ephemeral Flyway containers, eliminating schema drift and keeping master reference data (regions, default hubs, settings) in sync with production.
 
 ---
 
@@ -200,7 +202,7 @@ When you trigger an integration test (e.g., `make test-intra-node`), the harness
 ┌────────────────────────────────────────────────────────────────────────┐
 │            2. Backing Infrastructure Provisioning (env.Builder)        │
 │  - Create isolated bridge network (e.g. sort-mistake-intra-node-net)   │
-│  - Spin up MySQL: create databases & execute DDL schema migrations     │
+│  - Spin up MySQL: create databases & run Flyway migrations from repos  │
 │  - Spin up Redis: boot instances with network aliases                  │
 │  - Spin up Kafka: boot broker & pre-provision event topics             │
 │  - Spin up WireMock: boot mock server & register AAA auth stubs        │
@@ -229,7 +231,7 @@ When you trigger an integration test (e.g., `make test-intra-node`), the harness
 │  - Truncate all database tables (scenario.TruncateTables)              │
 │  - Flush Redis caches (scenario.FlushRedis)                            │
 │  - Create isolated Kafka consumers (unique consumer group UUIDs)       │
-│  - Execute test steps (HTTP API calls, Kafka events, DB assertions)   │
+│  - Execute test steps (HTTP API calls, Kafka events, DB assertions)    │
 └──────────────────────────────────┬─────────────────────────────────────┘
                                    ▼
 ┌────────────────────────────────────────────────────────────────────────┐

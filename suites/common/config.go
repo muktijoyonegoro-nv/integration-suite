@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"integration-suite/pkg/catalog"
+	"integration-suite/pkg/env"
 )
 
 // ScenarioConfig declares the infrastructure and services required for a test scenario.
@@ -20,8 +21,9 @@ type ScenarioConfig struct {
 
 // MySQLConfig holds scenario-specific MySQL settings.
 type MySQLConfig struct {
-	Databases   []string // Databases to ensure exist
-	CheckTables []string // Tables (e.g. "sort_mistake.intra_hub_nodes") to verify in connectivity checks
+	Databases   []string                // Databases to ensure exist
+	CheckTables []string                // Tables (e.g. "sort_mistake.intra_hub_nodes") to verify in connectivity checks
+	Migrations  []env.DatabaseMigration // Optional explicit Flyway migrations
 }
 
 // KafkaConfig holds scenario-specific Kafka settings.

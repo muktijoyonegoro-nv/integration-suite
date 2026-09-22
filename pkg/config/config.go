@@ -35,6 +35,7 @@ func DefaultConfig() *Config {
 				"kafka":    "confluentinc/confluent-local:7.6.0",
 				"redis":    "redis:7-alpine",
 				"wiremock": "docker.io/wiremock/wiremock:3.5.2",
+				"flyway":   "docker.io/flyway/flyway:11-alpine",
 			},
 		},
 	}

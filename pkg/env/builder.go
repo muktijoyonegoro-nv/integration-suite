@@ -3,6 +3,10 @@ package env
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -15,8 +19,15 @@ import (
 	"integration-suite/pkg/testutil"
 )
 
+// DatabaseMigration defines a database target and the host directory containing Flyway .sql migrations.
+type DatabaseMigration struct {
+	Database     string
+	MigrationDir string
+}
+
 type MySQLConfig struct {
-	Databases []string
+	Databases  []string
+	Migrations []DatabaseMigration
 }
 
 type KafkaConfig struct {
@@ -153,10 +164,31 @@ func (b *Builder) Build(ctx context.Context) (*Environment, error) {
 			}
 		}
 
-		// Initialize DDL schemas
-		if err := testutil.InitDBSchemas(db); err != nil {
-			_ = env.Teardown(ctx)
-			return nil, fmt.Errorf("failed initializing schemas: %w", err)
+		// Run Flyway migrations
+		migrations := b.mysqlConfig.Migrations
+		if len(migrations) == 0 {
+			// Auto-discover migrations based on database names (e.g. sort_mistake -> service sort-mistake)
+			for _, dbName := range b.mysqlConfig.Databases {
+				serviceName := strings.ReplaceAll(dbName, "_", "-")
+				repoDir := cfg.GetLocalRepoDir(serviceName, "")
+				candidateDir := filepath.Join(repoDir, "resources", "db", "migration")
+				if info, err := os.Stat(candidateDir); err == nil && info.IsDir() {
+					migrations = append(migrations, DatabaseMigration{
+						Database:     dbName,
+						MigrationDir: candidateDir,
+					})
+				}
+			}
+		}
+
+		for _, mig := range migrations {
+			if mig.MigrationDir == "" {
+				continue
+			}
+			if err := b.runFlywayMigration(ctx, net, "mysql", "3306", mig.Database, mig.MigrationDir); err != nil {
+				_ = env.Teardown(ctx)
+				return nil, fmt.Errorf("failed running flyway migration for [%s]: %w", mig.Database, err)
+			}
 		}
 	}
 
@@ -265,4 +297,63 @@ func (b *Builder) Build(ctx context.Context) (*Environment, error) {
 	}
 
 	return env, nil
+}
+
+// runFlywayMigration executes an ephemeral Flyway container to apply migrations to the specified database.
+func (b *Builder) runFlywayMigration(ctx context.Context, net *testcontainers.DockerNetwork, dbHost, dbPort, dbName, migrationDir string) error {
+	absDir, err := filepath.Abs(migrationDir)
+	if err != nil {
+		return fmt.Errorf("invalid migration directory path [%s]: %w", migrationDir, err)
+	}
+	if info, err := os.Stat(absDir); err != nil || !info.IsDir() {
+		return fmt.Errorf("migration directory [%s] not found or is not a directory: %w", absDir, err)
+	}
+
+	flywayImage := b.cfg.GetImage("flyway", "docker.io/flyway/flyway:11-alpine")
+	jdbcURL := fmt.Sprintf("jdbc:mysql://%s:%s/%s?allowPublicKeyRetrieval=true&useSSL=false", dbHost, dbPort, dbName)
+
+	req := testcontainers.GenericContainerRequest{
+		ContainerRequest: testcontainers.ContainerRequest{
+			Image: flywayImage,
+			Cmd: []string{
+				"-url=" + jdbcURL,
+				"-user=root",
+				"-password=root",
+				"-connectRetries=60",
+				"migrate",
+			},
+			Binds: []string{
+				fmt.Sprintf("%s:/flyway/sql:ro", absDir),
+			},
+			Networks:   []string{net.Name},
+			Labels:     DefaultLabels("flyway-" + dbName),
+			WaitingFor: wait.ForExit().WithExitTimeout(2 * time.Minute),
+		},
+		Started: true,
+	}
+
+	c, err := testcontainers.GenericContainer(ctx, req)
+	if err != nil {
+		return fmt.Errorf("failed starting flyway container for db [%s]: %w", dbName, err)
+	}
+	defer func() {
+		_ = c.Terminate(context.Background())
+	}()
+
+	state, err := c.State(ctx)
+	if err != nil {
+		return fmt.Errorf("failed inspecting flyway state for db [%s]: %w", dbName, err)
+	}
+
+	if state.ExitCode != 0 {
+		var logMsg string
+		if r, logErr := c.Logs(ctx); logErr == nil {
+			if b, readErr := io.ReadAll(r); readErr == nil {
+				logMsg = string(b)
+			}
+		}
+		return fmt.Errorf("flyway migration failed for db [%s] with exit code %d:\n%s", dbName, state.ExitCode, logMsg)
+	}
+
+	return nil
 }

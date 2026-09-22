@@ -68,7 +68,7 @@ We chose **Option 4: Testcontainers with Rootless Podman**.
 We have established a dedicated integration testing platform (`integration-suite`) built on the following foundational architecture:
 
 ### 4.1. Clean Configuration Separation
-* **Public Infrastructure (`config.yaml`)**: Centralizes third-party container images (`mysql:8.0`, `confluentinc/confluent-local:7.6.0`, `redis:7-alpine`, `wiremock:3.5.2`) and runtime binary paths.
+* **Public Infrastructure (`config.yaml`)**: Centralizes third-party container images (`mysql:8.0`, `confluentinc/confluent-local:7.6.0`, `redis:7-alpine`, `wiremock:3.5.2`, `flyway/flyway:11-alpine`) and runtime binary paths.
 * **Local Repositories (`.env`)**: Maps service names to developers' local checkouts (`<SERVICE>_DIR`) and local image tags (`<SERVICE>_IMAGE`), allowing developers to test local code changes immediately without publishing to external registries.
 
 ### 4.2. Declarative Scenario-Level Granularity
@@ -85,6 +85,9 @@ Each scenario declares only its required dependencies via `ScenarioConfig`:
 
 ### 4.4. Dev-Time Protobuf Compilation
 Protobuf definitions are committed and pre-compiled (`make proto-gen`). Test execution does not depend on runtime installations of `protoc` or `protoc-gen-go`.
+
+### 4.5. Ephemeral Production Migration Execution (Flyway)
+To prevent schema drift and eliminate duplicate hardcoded DDL scripts, the harness dynamically executes the actual Flyway migration scripts (`resources/db/migration`) directly from each service's local repository checkout using ephemeral `flyway/flyway` containers before application services boot. Master reference data (e.g. regions, countries, default configurations) is seeded identically to production.
 
 ---
 

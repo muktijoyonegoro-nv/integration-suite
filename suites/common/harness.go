@@ -135,7 +135,8 @@ func Setup(t *testing.T, cfg ScenarioConfig) *Scenario {
 
 		if len(cfg.MySQL.Databases) > 0 {
 			builder = builder.WithMySQL(env.MySQLConfig{
-				Databases: cfg.MySQL.Databases,
+				Databases:  cfg.MySQL.Databases,
+				Migrations: cfg.MySQL.Migrations,
 			})
 		}
 

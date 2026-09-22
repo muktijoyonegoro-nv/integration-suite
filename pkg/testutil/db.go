@@ -41,50 +41,6 @@ func ConnectMySQL(dsn string) (*sql.DB, error) {
 	return db, nil
 }
 
-// InitDBSchemas creates the sort_mistake and sort_service databases and tables.
-func InitDBSchemas(rootDB *sql.DB) error {
-	ctx := context.Background()
-
-	stmts := []string{
-		`CREATE DATABASE IF NOT EXISTS sort_mistake;`,
-		`CREATE DATABASE IF NOT EXISTS sort_service;`,
-
-		`CREATE TABLE IF NOT EXISTS sort_mistake.intra_hub_nodes (
-			id BIGINT NOT NULL AUTO_INCREMENT,
-			system_id VARCHAR(10) COLLATE utf8mb4_unicode_ci NOT NULL,
-			hub_id BIGINT NOT NULL,
-			type VARCHAR(30) NOT NULL,
-			ref_hub_id BIGINT NOT NULL,
-			name VARCHAR(128) COLLATE utf8mb4_unicode_ci NOT NULL,
-			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-			PRIMARY KEY (id),
-			UNIQUE KEY intra_hub_nodes_system_id_hub_id_type_ref_hub_id (system_id ASC, hub_id ASC, type ASC, ref_hub_id ASC)
-		) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;`,
-
-		`CREATE TABLE IF NOT EXISTS sort_service.intra_hub_nodes (
-			id BIGINT NOT NULL AUTO_INCREMENT,
-			system_id VARCHAR(10) COLLATE utf8mb4_unicode_ci NOT NULL,
-			hub_id BIGINT NOT NULL,
-			type VARCHAR(30) NOT NULL,
-			ref_hub_id BIGINT NOT NULL,
-			name VARCHAR(128) COLLATE utf8mb4_unicode_ci NOT NULL,
-			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-			PRIMARY KEY (id),
-			UNIQUE KEY intra_hub_nodes_system_id_hub_id_type_ref_hub_id (system_id ASC, hub_id ASC, type ASC, ref_hub_id ASC)
-		) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4 COLLATE = utf8mb4_unicode_ci;`,
-	}
-
-	for _, stmt := range stmts {
-		if _, err := rootDB.ExecContext(ctx, stmt); err != nil {
-			return fmt.Errorf("failed executing schema DDL [%s]: %w", stmt, err)
-		}
-	}
-
-	return nil
-}
-
 // TruncateTables clears table rows across both databases for test isolation.
 func TruncateTables(ctx context.Context, db *sql.DB) error {
 	tables := []string{
