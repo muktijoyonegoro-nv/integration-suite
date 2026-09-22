@@ -1,0 +1,218 @@
+syntax = "proto3";
+
+package protos.sort.sortmistake;
+
+option java_package = "co.ninjavan.protos.sort.sortmistake";
+option java_outer_classname = "SortMistake";
+option go_package = "bitbucket.ninjavan.co/sort/sort-protos/go/sortmistake";
+
+enum NodeType {
+  NODE_TYPE_UNSPECIFIED = 0;
+  NODE_TYPE_HUB = 1;
+  NODE_TYPE_MIDDLE = 2;
+  NODE_TYPE_ZONE = 3;
+
+  NODE_TYPE_INTRA_INPUT = 4;
+  NODE_TYPE_INTRA_MID = 5;
+  NODE_TYPE_INTRA_OUTPUT = 6;
+}
+
+enum NodeEvent {
+  NODE_EVENT_UNSPECIFIED = 0;
+  NODE_EVENT_CREATED = 1;
+  NODE_EVENT_UPDATED = 2;
+  NODE_EVENT_DELETED = 3;
+}
+
+enum NodeEventType {
+  NODE_EVENT_TYPE_UNSPECIFIED = 0;
+  NODE_EVENT_TYPE_INTERNAL = 1;
+  NODE_EVENT_TYPE_EXTERNAL = 2;
+}
+
+enum NodeError {
+  NODE_ERROR_UNSPECIFIED = 0;
+  NODE_ERROR_DATABASE = 1;
+  NODE_ERROR_REDIS = 2;
+  NODE_ERROR_KAFKA = 3;
+}
+
+enum PathEvent {
+  PATH_EVENT_UNSPECIFIED = 0;
+  PATH_EVENT_CREATED = 1;
+  PATH_EVENT_UPDATED = 2;
+  PATH_EVENT_DELETED = 3;
+}
+
+enum ZoneFilterEvent {
+  ZONE_FILTER_EVENT_UNSPECIFIED = 0;
+  ZONE_FILTER_EVENT_CREATED = 1;
+  ZONE_FILTER_EVENT_UPDATED = 2;
+  ZONE_FILTER_EVENT_DELETED = 3;
+}
+
+enum OrderTagFilterEvent {
+  ORDER_TAG_FILTER_EVENT_UNSPECIFIED = 0;
+  ORDER_TAG_FILTER_EVENT_CREATED = 1;
+  ORDER_TAG_FILTER_EVENT_UPDATED = 2;
+  ORDER_TAG_FILTER_EVENT_DELETED = 3;
+}
+
+enum OutputNodeEvent {
+  OUTPUT_NODE_EVENT_UNSPECIFIED = 0;
+  OUTPUT_NODE_EVENT_CREATED = 1;
+  OUTPUT_NODE_EVENT_UPDATED = 2;
+  OUTPUT_NODE_EVENT_DELETED = 3;
+}
+
+
+enum MapEvent {
+  MAP_EVENT_UNSPECIFIED = 0;
+  MAP_EVENT_CREATED = 1;
+  MAP_EVENT_UPDATED = 2;
+  MAP_EVENT_DELETED = 3;
+}
+
+enum MapError {
+  MAP_ERROR_UNSPECIFIED = 0;
+  MAP_ERROR_GENERATE = 1;
+  MAP_ERROR_STORE = 2;
+  MAP_ERROR_PUBLISH = 3;
+}
+
+message SortNode {
+  int64 id = 1;
+  int64 real_id = 3;
+  int64 hub_id = 4;
+  string name = 5;
+  NodeType type = 6;
+  string system_id = 9;
+
+  uint32 rejection_criteria = 11;
+
+  int64 compat_id = 51;
+  NodeEvent node_event = 101;
+
+  NodeError error                                         = 200;
+  int32 retry_count                                       = 202;
+  uint64 retry_datetime                                   = 203;
+}
+
+message SortPath {
+  int64 source_node_id = 1;
+  int64 destination_node_id = 2;
+  int64 id = 4;
+  int64 hub_id = 5;
+  string system_id = 9;
+  uint32 distance = 10;
+  uint32 rejection_conditions = 11;
+  repeated int64 zone_filters = 12 [deprecated=true];   // deprecated: LM-only
+  string label = 21;
+  repeated PathZoneFilter zone_filter_refs = 22;
+  repeated PathOrderTagFilter order_tag_filter_refs = 23;
+
+  PathEvent path_event = 101;
+}
+
+message PathZoneFilter {
+  int64 zone_id = 1;
+  string zone_type = 2;
+}
+
+message PathOrderTagFilter {
+  int64 order_tag_id = 1;
+  string strategy = 2;
+}
+
+message SortMap {
+  int64 zone_id = 1;
+  int64 zone_node_id = 2;
+  int64 source_node_id = 5;
+  int64 destination_node_id = 6;
+  string system_id = 9;
+
+  uint32 distance = 10;
+  uint32 adjusted_distance = 11;
+  uint32 rejection_conditions = 12;
+
+  string label = 21;
+
+  MapEvent map_event = 101;
+}
+
+message ZoneFilter {
+  int64 id = 1;
+  string system_id = 2;
+  int64 hub_id = 3;
+  int64 source_id = 4;
+  int64 destination_id = 5;
+  int64 zone_id = 6;
+  int64 ref_reject_condition_id = 7;
+  string zone_type = 8;
+
+  ZoneFilterEvent zone_filter_event = 101;
+}
+
+message OrderTagFilter {
+  int64 id = 1;
+  string system_id = 2;
+  int64 hub_id = 3;
+  int64 source_id = 4;
+  int64 destination_id = 5;
+  int64 order_tag_id = 6;
+  string strategy = 7;
+  OrderTagFilterEvent order_tag_filter_event = 101;
+}
+
+message OutputNode {
+  int64 id = 1;
+  string system_id = 2;
+  int64 hub_id = 3;
+  int64 output_hub_id = 4;
+  int64 zone_id = 5;
+  string zone_type = 6;
+
+  OutputNodeEvent output_node_event = 101;
+}
+
+message SortNodeEvents {
+  string system_id = 9;
+  NodeEventType type = 10;
+
+  repeated SortNode node = 1;
+  repeated SortPath path = 2;
+  repeated ZoneFilter zoneFilter = 3;
+  repeated OutputNode outputNode = 4;
+  repeated OrderTagFilter orderTagFilters = 5;
+}
+
+message SortMapEvents {
+  string system_id = 9;
+  repeated SortMap sortmap = 1;
+}
+
+message SortMapGenerate {
+  string system_id                                        = 9;
+
+  SortNode zone_node                                      = 1;
+  repeated SortPath path                                  = 2;
+  repeated SortMap sort_map                               = 3;
+
+  MapError map_error                                      = 100;
+  int32 version                                           = 101;
+  int32 retry_count                                       = 102;
+  uint64 retry_datetime                                   = 103;
+}
+
+message IntraCachingPathCondition {
+  int64 destination_id = 1;
+  int32 reject_conditions = 2;
+}
+
+message IntraCachingPathConditionList {
+  repeated IntraCachingPathCondition paths = 1;
+}
+
+message IntraCachingOutputNode {
+  repeated int64 zone_id = 1;
+}
