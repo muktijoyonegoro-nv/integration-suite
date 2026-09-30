@@ -9,7 +9,7 @@ import (
 
 // ScenarioConfig declares the infrastructure and services required for a test scenario.
 type ScenarioConfig struct {
-	Name           string          // e.g. "sort-mistake/intra_node"
+	Name           string          // e.g. "e2e/intra_node", "producer/intra_node", "consumer/intra_node"
 	NetworkName    string          // Optional; if empty, defaults to sanitized Name + "-net"
 	StartupTimeout time.Duration   // Optional; if 0, defaults to 5 minutes
 	MySQL          MySQLConfig

@@ -61,9 +61,13 @@ func (s *Scenario) RedisClient(alias string) *redis.Client {
 }
 
 // TruncateTables clears table rows across configured databases for clean test isolation.
-func (s *Scenario) TruncateTables(ctx context.Context) error {
+// If tables is omitted, it defaults to the scenario's MySQL.CheckTables.
+func (s *Scenario) TruncateTables(ctx context.Context, tables ...string) error {
 	if s.Env.DB != nil {
-		return testutil.TruncateTables(ctx, s.Env.DB)
+		if len(tables) == 0 {
+			tables = s.Config.MySQL.CheckTables
+		}
+		return testutil.TruncateTables(ctx, s.Env.DB, tables...)
 	}
 	return nil
 }

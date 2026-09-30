@@ -14,7 +14,7 @@ SORT_SERVICE_DIR ?= ../sort-service
 SORT_MISTAKE_IMAGE ?= sort-mistake:latest
 SORT_SERVICE_IMAGE ?= sort-service:latest
 
-.PHONY: test test-sort-mistake test-intra-node test-report proto-gen clean clean-containers prune-containers prune-images pull-images build-image build-images build-sort-mistake build-sort-service help
+.PHONY: test test-e2e test-sort-mistake test-intra-node test-producer test-consumer test-report proto-gen clean clean-containers prune-containers prune-images pull-images build-image build-images build-sort-mistake build-sort-service help
 
 help:
 	@echo "Multi-Repo Integration Test Platform Commands:"
@@ -30,12 +30,18 @@ help:
 	@echo "  make test              Run integration test suites (overridable: SUITE=..., RUN=..., TIMEOUT=...)"
 	@echo "                         Examples:"
 	@echo "                           make test"
-	@echo "                           make test SUITE=sort-mistake"
-	@echo "                           make test SUITE=sort-mistake/intra_node"
+	@echo "                           make test SUITE=e2e"
+	@echo "                           make test SUITE=producer"
+	@echo "                           make test SUITE=consumer"
+	@echo "                           make test SUITE=e2e/intra_node"
+	@echo "                           make test SUITE=producer/intra_node"
+	@echo "                           make test SUITE=consumer/intra_node"
 	@echo "                           make test RUN=TestSortTaskPipeline"
-	@echo "                           make test SUITE=sort-mistake/intra_node TIMEOUT=5m"
-	@echo "  make test-sort-mistake Shortcut for 'make test SUITE=sort-mistake'"
-	@echo "  make test-intra-node   Shortcut for 'make test SUITE=sort-mistake/intra_node'"
+	@echo "                           make test SUITE=e2e/intra_node TIMEOUT=5m"
+	@echo "  make test-e2e          Shortcut for 'make test SUITE=e2e'"
+	@echo "  make test-intra-node   Shortcut for full E2E test 'make test SUITE=e2e/intra_node'"
+	@echo "  make test-producer     Shortcut for partial test 'make test SUITE=producer/intra_node'"
+	@echo "  make test-consumer     Shortcut for partial test 'make test SUITE=consumer/intra_node'"
 	@echo "  make proto-gen         Compile .proto files in proto/ into Go code (dev-time)"
 	@echo "  make test-report       Run tests and generate standard JUnit XML report in reports/"
 	@echo "  make prune-containers  Safely prune test containers by label (images untouched)"
@@ -106,11 +112,20 @@ test: bin/test-runner
 	@echo "Running integration tests [target: $(TEST_TARGET)] [timeout: $(TIMEOUT)]$(if $(RUN), [filter: $(RUN)])..."
 	@./bin/test-runner go test -p 1 -v -timeout $(TIMEOUT) $(if $(RUN),-run '$(RUN)') $(TEST_TARGET)
 
+test-e2e:
+	@$(MAKE) test SUITE=e2e TIMEOUT=10m
+
 test-sort-mistake:
-	@$(MAKE) test SUITE=sort-mistake TIMEOUT=10m
+	@$(MAKE) test SUITE=e2e TIMEOUT=10m
 
 test-intra-node:
-	@$(MAKE) test SUITE=sort-mistake/intra_node TIMEOUT=5m
+	@$(MAKE) test SUITE=e2e/intra_node TIMEOUT=5m
+
+test-producer:
+	@$(MAKE) test SUITE=producer/intra_node TIMEOUT=5m
+
+test-consumer:
+	@$(MAKE) test SUITE=consumer/intra_node TIMEOUT=5m
 
 test-report: bin/test-runner
 	@mkdir -p reports

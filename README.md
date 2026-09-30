@@ -42,21 +42,27 @@ A modular, polyglot integration testing harness designed to validate end-to-end 
 
 4. **Run tests**:
    ```bash
-   # Run all integration test suites across all repositories:
+   # Run all integration test suites across all categories:
    make test
 
-   # Run a specific repository's test scenarios:
-   make test SUITE=sort-mistake
+   # Run a specific category (e2e, producer, or consumer):
+   make test SUITE=e2e
+   make test SUITE=producer
+   make test SUITE=consumer
 
    # Run a specific scenario:
-   make test SUITE=sort-mistake/intra_node
+   make test SUITE=e2e/intra_node
 
    # Filter specific test functions with custom timeout:
-   make test SUITE=sort-mistake/intra_node RUN=TestSortTaskPipeline TIMEOUT=5m
+   make test SUITE=e2e/intra_node RUN=TestSortTaskPipeline TIMEOUT=5m
 
-   # (Optional shortcuts still supported):
-   make test-intra-node
-   make test-sort-mistake
+   # Partial / component-isolated testing (low resource consumption):
+   make test-producer     # Shortcut for make test SUITE=producer/intra_node
+   make test-consumer     # Shortcut for make test SUITE=consumer/intra_node
+
+   # Full E2E shortcuts:
+   make test-e2e          # Shortcut for make test SUITE=e2e
+   make test-intra-node   # Shortcut for make test SUITE=e2e/intra_node
    ```
 
 5. **Clean up containers & dangling images**:
@@ -507,6 +513,32 @@ test-<scenario-name>:
 
 ---
 
+### 7. Kafka Contract Testing & Partial Testing (Resource-Optimized)
+
+To significantly decrease memory usage, container overhead, and developer iteration latency, the suite supports **Contract Testing** and **Partial (Component-Isolated) Testing**:
+
+```text
+Full E2E Pipeline (make test-intra-node):
+  [WireMock] + [sort-mistake (Go)] + [Kafka] + [MySQL x2] + [Redis x2] + [sort-service (Java/JVM)]
+  -> ~7 containers | ~2.5 - 3.5 GB RAM | ~35-60s startup
+
+Partial Producer Test (make test-producer):
+  [WireMock] + [sort-mistake (Go)] + [Kafka] + [MySQL sort_mistake] + [Redis sort-mistake]
+  -> ~4-5 containers | ~1.2 - 1.6 GB RAM (~55% reduction!) | <15s startup
+  -> Validates REST API, DB state, and strict Kafka schema & data contract!
+
+Partial Consumer Test (make test-consumer):
+  [WireMock] + [Kafka] + [MySQL sort_service] + [Redis sort] + [sort-service (Java/JVM)]
+  -> ~4-5 containers | ~1.8 - 2.4 GB RAM | Injects synthetic contract fixtures directly into Kafka
+```
+
+#### Why Use Partial & Contract Testing?
+1. **Developer Velocity**: Working on `sort-mistake`? Run `make test-producer`. You do not need Java/SBT installed, and you never wait for `sort-service` JVM container boot!
+2. **Strict Schema & Semantic Invariants**: [`pkg/contract/sortmistake`](file:///Users/muktiwibowo/Documents/NV/dev/integration-suite/pkg/contract/sortmistake) validates protobuf wire integrity, non-zero IDs, valid enum variants, and required payload fields independently of consumer availability.
+3. **Consumer Edge Cases & Idempotency**: [`make test-consumer`](file:///Users/muktiwibowo/Documents/NV/dev/integration-suite/suites/consumer/intra_node) injects contract-compliant events ([`pkg/contract/fixtures`](file:///Users/muktiwibowo/Documents/NV/dev/integration-suite/pkg/contract/fixtures)) directly to test idempotency, out-of-order deliveries, and schema compatibility without exercising producer APIs.
+
+---
+
 ## Common Makefile Commands
 
 | Command | Description |
@@ -518,10 +550,13 @@ test-<scenario-name>:
 | `make build-sort-mistake` | Shortcut to build only the `sort-mistake` container image |
 | `make build-sort-service` | Shortcut to build only the `sort-service` container image |
 | `make test` | Run all integration test suites with resource monitoring (`SUITE=...`, `RUN=...`, `TIMEOUT=...`) |
-| `make test SUITE=<path>` | Run a specific scenario or sub-package (e.g. `SUITE=sort-mistake/intra_node`) |
+| `make test SUITE=<category>` | Run a category of suites (`SUITE=e2e`, `SUITE=producer`, or `SUITE=consumer`) |
+| `make test SUITE=<path>` | Run a specific scenario (e.g. `SUITE=e2e/intra_node`, `SUITE=producer/intra_node`) |
 | `make test RUN=<pattern>` | Filter specific tests by regex (e.g. `RUN=TestSortTaskPipeline`) |
-| `make test-sort-mistake` | Shortcut for `make test SUITE=sort-mistake TIMEOUT=10m` |
-| `make test-intra-node` | Shortcut for `make test SUITE=sort-mistake/intra_node TIMEOUT=5m` |
+| `make test-e2e` | Shortcut for `make test SUITE=e2e TIMEOUT=10m` |
+| `make test-intra-node` | Shortcut for full E2E test `make test SUITE=e2e/intra_node TIMEOUT=5m` |
+| `make test-producer` | Shortcut for isolated producer test `make test SUITE=producer/intra_node TIMEOUT=5m` |
+| `make test-consumer` | Shortcut for isolated consumer test `make test SUITE=consumer/intra_node TIMEOUT=5m` |
 | `make test-report` | Run test suites and generate JUnit XML report (`reports/junit.xml`) with resource monitoring |
 | `make prune-containers` | Safely stop and remove all managed test containers (`label=harness.managed=true`) |
 | `make prune-images` | Safely prune dangling/intermediate build images |

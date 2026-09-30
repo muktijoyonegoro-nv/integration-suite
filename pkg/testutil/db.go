@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -41,15 +42,22 @@ func ConnectMySQL(dsn string) (*sql.DB, error) {
 	return db, nil
 }
 
-// TruncateTables clears table rows across both databases for test isolation.
-func TruncateTables(ctx context.Context, db *sql.DB) error {
-	tables := []string{
-		"sort_mistake.intra_hub_nodes",
-		"sort_service.intra_hub_nodes",
+// TruncateTables clears table rows across specified tables for test isolation.
+// If tables is empty, it attempts to truncate default tables, ignoring tables that do not exist.
+func TruncateTables(ctx context.Context, db *sql.DB, tables ...string) error {
+	if len(tables) == 0 {
+		tables = []string{
+			"sort_mistake.intra_hub_nodes",
+			"sort_service.intra_hub_nodes",
+		}
 	}
 
 	for _, table := range tables {
 		if _, err := db.ExecContext(ctx, fmt.Sprintf("TRUNCATE TABLE %s", table)); err != nil {
+			// If table doesn't exist (MySQL Error 1146), skip it gracefully
+			if strings.Contains(err.Error(), "1146") {
+				continue
+			}
 			return fmt.Errorf("failed to truncate %s: %w", table, err)
 		}
 	}

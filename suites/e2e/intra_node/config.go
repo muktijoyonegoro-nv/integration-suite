@@ -29,8 +29,8 @@ const (
 )
 
 var scenarioConfig = common.ScenarioConfig{
-	Name:        "sort-mistake/intra_node",
-	NetworkName: "sort-mistake-intra-node-net",
+	Name:        "e2e/intra_node",
+	NetworkName: "e2e-intra-node-net",
 	MySQL: common.MySQLConfig{
 		Databases:   []string{"sort_mistake", "sort_service"},
 		CheckTables: []string{"sort_mistake.intra_hub_nodes", "sort_service.intra_hub_nodes"},

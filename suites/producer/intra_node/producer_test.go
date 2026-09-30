@@ -14,42 +14,40 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"integration-suite/pkg/contract/sortmistake"
 	"integration-suite/pkg/testutil"
-	"integration-suite/proto/sortmistake"
+	protoSortMistake "integration-suite/proto/sortmistake"
 	"integration-suite/suites/common"
 )
 
-func TestSortTaskPipeline_FullCRUDCycle(t *testing.T) {
+func TestSortMistake_ProducerContractPipeline(t *testing.T) {
 	ctx := context.Background()
 
 	scenario := common.Setup(t, scenarioConfig)
 
 	sortMistakeBaseURL := scenario.Endpoint("sort-mistake")
 	redisMistake := scenario.RedisClient("redis-sort-mistake")
-	redisSort := scenario.RedisClient("redis-sort")
 	require.NotNil(t, redisMistake, "redis-sort-mistake client must not be nil")
-	require.NotNil(t, redisSort, "redis-sort client must not be nil")
 
 	// 1. Per-test state isolation
 	require.NoError(t, scenario.TruncateTables(ctx), "tables must be clean")
 	require.NoError(t, scenario.FlushRedis(ctx), "redis instances must be clean")
 
 	// 2. Setup Kafka Reader to monitor topic
-	reader := testutil.NewKafkaReader(scenario.KafkaBroker(), SortMistakeNodesTopic, "pipeline-test-"+uuid.NewString())
+	reader := testutil.NewKafkaReader(scenario.KafkaBroker(), SortMistakeNodesTopic, "producer-test-"+uuid.NewString())
 	defer reader.Close()
 
 	systemID := "sg"
 	hubID := int64(101)
-	nodeName := "STATION_ALPHA"
-	updatedNodeName := "STATION_ALPHA_UPDATED"
+	nodeName := "PRODUCER_STATION_ALPHA"
+	updatedNodeName := "PRODUCER_STATION_ALPHA_UPDATED"
 
 	var createdNodeID int64
 
 	// =========================================================================
-	// STEP 1: CREATE SORT TASK
+	// STEP 1: CREATE NODE VIA API & ASSERT CONTRACT
 	// =========================================================================
-	t.Run("Step 1 - Create Sort Task", func(t *testing.T) {
-		// 1. Send HTTP POST to live sort-mistake API
+	t.Run("Step 1 - Create Node & Verify Kafka Contract", func(t *testing.T) {
 		createPayload := map[string]interface{}{
 			"name": nodeName,
 			"type": "NODE_TYPE_INTRA_MID",
@@ -70,38 +68,32 @@ func TestSortTaskPipeline_FullCRUDCycle(t *testing.T) {
 		respBody, _ := io.ReadAll(resp.Body)
 		require.Contains(t, []int{http.StatusOK, http.StatusCreated}, resp.StatusCode, "API call failed with body: %s", string(respBody))
 
-		// 2. Assert message published on Kafka topic
+		// Read and assert message satisfies schema & data contract
 		readCtx, readCancel := context.WithTimeout(ctx, 15*time.Second)
 		defer readCancel()
 
 		receivedEvent, err := testutil.ReadNextSortNodeEvent(readCtx, reader)
 		require.NoError(t, err, "should read SortNodeEvents from Kafka")
-		require.Len(t, receivedEvent.Node, 1)
 
-		createdNode := receivedEvent.Node[0]
-		assert.Equal(t, sortmistake.NodeEvent_NODE_EVENT_CREATED, createdNode.NodeEvent)
-		assert.Equal(t, systemID, createdNode.SystemId)
-		assert.Equal(t, hubID, createdNode.HubId)
-		assert.Equal(t, nodeName, createdNode.Name)
+		// Strict contract validation
+		createdNodeID = sortmistake.AssertNodeCreatedContract(
+			t,
+			receivedEvent,
+			systemID,
+			hubID,
+			nodeName,
+			protoSortMistake.NodeType_NODE_TYPE_INTRA_MID,
+		)
+		require.Positive(t, createdNodeID, "created node ID must be positive")
 
-		createdNodeID = createdNode.Id
-
-		// 3. Assert downstream sort-service automatically consumed event and synced DB + Redis
+		// Assert producer's internal MySQL state
 		assert.Eventually(t, func() bool {
-			record, err := testutil.QueryIntraHubNode(ctx, scenario.DB(), "sort_service", createdNodeID)
-			if err != nil || record == nil || record.Name != nodeName {
-				return false
-			}
-			cachedProto, err := testutil.GetSortServiceIntraNode(ctx, redisSort, systemID, hubID, createdNodeID)
-			if err != nil || cachedProto == nil || cachedProto.Name != nodeName {
-				return false
-			}
-			return true
-		}, 15*time.Second, 200*time.Millisecond, "sort-service must consume create event and populate DB + Redis")
+			record, err := testutil.QueryIntraHubNode(ctx, scenario.DB(), "sort_mistake", createdNodeID)
+			return err == nil && record != nil && record.Name == nodeName
+		}, 10*time.Second, 200*time.Millisecond, "sort_mistake must persist created node in DB")
 	})
 
-	// Helper to create an intra-hub node through sort-mistake's live POST API,
-	// consume the resulting creation event from Kafka, and ensure downstream DB sync.
+	// Helper to create an intra-hub node through sort-mistake's live POST API
 	createNodeViaAPI := func(t *testing.T, name string) int64 {
 		t.Helper()
 
@@ -125,33 +117,29 @@ func TestSortTaskPipeline_FullCRUDCycle(t *testing.T) {
 		respBody, _ := io.ReadAll(resp.Body)
 		require.Contains(t, []int{http.StatusOK, http.StatusCreated}, resp.StatusCode, "API create failed with body: %s", string(respBody))
 
-		// Read creation event from Kafka to advance reader offset and retrieve node ID
 		readCtx, readCancel := context.WithTimeout(ctx, 15*time.Second)
 		defer readCancel()
 
 		evt, err := testutil.ReadNextSortNodeEvent(readCtx, reader)
 		require.NoError(t, err, "should read SortNodeEvents from Kafka")
-		require.NotEmpty(t, evt.Node)
-		nodeID := evt.Node[0].Id
 
-		// Wait for downstream sort-service to sync before returning
-		assert.Eventually(t, func() bool {
-			record, err := testutil.QueryIntraHubNode(ctx, scenario.DB(), "sort_service", nodeID)
-			return err == nil && record != nil && record.Name == name
-		}, 15*time.Second, 200*time.Millisecond, "sort-service must sync created node")
-
-		return nodeID
+		return sortmistake.AssertNodeCreatedContract(
+			t,
+			evt,
+			systemID,
+			hubID,
+			name,
+			protoSortMistake.NodeType_NODE_TYPE_INTRA_MID,
+		)
 	}
 
 	// =========================================================================
-	// STEP 2: UPDATE SORT TASK
+	// STEP 2: UPDATE NODE VIA API & ASSERT CONTRACT
 	// =========================================================================
-	t.Run("Step 2 - Update Sort Task", func(t *testing.T) {
-		// 1. Prerequisite: Create node via live sort-mistake POST endpoint
-		targetNodeID := createNodeViaAPI(t, "STATION_UPDATE_TARGET")
-		require.NotEmpty(t, targetNodeID, "targetNodeID must be populated from prerequisite creation")
+	t.Run("Step 2 - Update Node & Verify Kafka Contract", func(t *testing.T) {
+		targetNodeID := createNodeViaAPI(t, "PRODUCER_UPDATE_TARGET")
+		require.Positive(t, targetNodeID, "targetNodeID must be populated")
 
-		// 2. Send HTTP PATCH to live sort-mistake API
 		updatePayload := map[string]interface{}{
 			"name": updatedNodeName,
 		}
@@ -171,42 +159,36 @@ func TestSortTaskPipeline_FullCRUDCycle(t *testing.T) {
 		respBody, _ := io.ReadAll(resp.Body)
 		require.Contains(t, []int{http.StatusOK, http.StatusNoContent}, resp.StatusCode, "PATCH API call failed with body: %s", string(respBody))
 
-		// 3. Assert update event published on Kafka topic
 		readCtx, readCancel := context.WithTimeout(ctx, 15*time.Second)
 		defer readCancel()
 
 		receivedEvent, err := testutil.ReadNextSortNodeEvent(readCtx, reader)
 		require.NoError(t, err, "should read SortNodeEvents from Kafka")
-		require.Len(t, receivedEvent.Node, 1)
 
-		updatedNode := receivedEvent.Node[0]
-		assert.Equal(t, sortmistake.NodeEvent_NODE_EVENT_UPDATED, updatedNode.NodeEvent)
-		assert.Equal(t, targetNodeID, updatedNode.Id)
-		assert.Equal(t, updatedNodeName, updatedNode.Name)
+		// Strict contract validation
+		sortmistake.AssertNodeUpdatedContract(
+			t,
+			receivedEvent,
+			systemID,
+			hubID,
+			targetNodeID,
+			updatedNodeName,
+		)
 
-		// 4. Assert downstream sort-service automatically consumed update event and synced DB + Redis
+		// Assert producer's internal MySQL state
 		assert.Eventually(t, func() bool {
-			record, err := testutil.QueryIntraHubNode(ctx, scenario.DB(), "sort_service", targetNodeID)
-			if err != nil || record == nil || record.Name != updatedNodeName {
-				return false
-			}
-			cachedProto, err := testutil.GetSortServiceIntraNode(ctx, redisSort, systemID, hubID, targetNodeID)
-			if err != nil || cachedProto == nil || cachedProto.Name != updatedNodeName {
-				return false
-			}
-			return true
-		}, 15*time.Second, 200*time.Millisecond, "sort-service must consume update event and update DB + Redis")
+			record, err := testutil.QueryIntraHubNode(ctx, scenario.DB(), "sort_mistake", targetNodeID)
+			return err == nil && record != nil && record.Name == updatedNodeName
+		}, 10*time.Second, 200*time.Millisecond, "sort_mistake must update node in DB")
 	})
 
 	// =========================================================================
-	// STEP 3: DELETE SORT TASK
+	// STEP 3: DELETE NODE VIA API & ASSERT CONTRACT
 	// =========================================================================
-	t.Run("Step 3 - Delete Sort Task", func(t *testing.T) {
-		// 1. Prerequisite: Create node via live sort-mistake POST endpoint
-		targetNodeID := createNodeViaAPI(t, "STATION_DELETE_TARGET")
-		require.NotEmpty(t, targetNodeID, "targetNodeID must be populated from prerequisite creation")
+	t.Run("Step 3 - Delete Node & Verify Kafka Contract", func(t *testing.T) {
+		targetNodeID := createNodeViaAPI(t, "PRODUCER_DELETE_TARGET")
+		require.Positive(t, targetNodeID, "targetNodeID must be populated")
 
-		// 2. Send HTTP DELETE to live sort-mistake API
 		url := fmt.Sprintf("%s/1.0/intra/hubs/%d/nodes/%d", sortMistakeBaseURL, hubID, targetNodeID)
 		req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
 		require.NoError(t, err)
@@ -219,33 +201,25 @@ func TestSortTaskPipeline_FullCRUDCycle(t *testing.T) {
 		respBody, _ := io.ReadAll(resp.Body)
 		require.Contains(t, []int{http.StatusOK, http.StatusNoContent}, resp.StatusCode, "DELETE API call failed with body: %s", string(respBody))
 
-		// 3. Assert delete event published on Kafka topic
 		readCtx, readCancel := context.WithTimeout(ctx, 15*time.Second)
 		defer readCancel()
 
 		receivedEvent, err := testutil.ReadNextSortNodeEvent(readCtx, reader)
 		require.NoError(t, err, "should read SortNodeEvents from Kafka")
-		require.Len(t, receivedEvent.Node, 1)
 
-		deletedNode := receivedEvent.Node[0]
-		assert.Equal(t, sortmistake.NodeEvent_NODE_EVENT_DELETED, deletedNode.NodeEvent)
-		assert.Equal(t, targetNodeID, deletedNode.Id)
+		// Strict contract validation
+		sortmistake.AssertNodeDeletedContract(
+			t,
+			receivedEvent,
+			systemID,
+			hubID,
+			targetNodeID,
+		)
 
-		// 4. Assert downstream sort-service automatically consumed delete event and evicted from DB + Redis
+		// Assert producer's internal MySQL state
 		assert.Eventually(t, func() bool {
-			ssRecord, err := testutil.QueryIntraHubNode(ctx, scenario.DB(), "sort_service", targetNodeID)
-			if err != nil || ssRecord != nil {
-				return false
-			}
-			smRecord, err := testutil.QueryIntraHubNode(ctx, scenario.DB(), "sort_mistake", targetNodeID)
-			if err != nil || smRecord != nil {
-				return false
-			}
-			cachedProto, err := testutil.GetSortServiceIntraNode(ctx, redisSort, systemID, hubID, targetNodeID)
-			if err != nil || cachedProto != nil {
-				return false
-			}
-			return true
-		}, 15*time.Second, 200*time.Millisecond, "sort-service and sort-mistake must evict deleted node from DB + Redis")
+			record, err := testutil.QueryIntraHubNode(ctx, scenario.DB(), "sort_mistake", targetNodeID)
+			return err == nil && record == nil
+		}, 10*time.Second, 200*time.Millisecond, "sort_mistake must delete node from DB")
 	})
 }
