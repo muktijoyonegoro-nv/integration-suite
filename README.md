@@ -316,6 +316,14 @@ The harness registers a cleanup callback via Go's standard `t.Cleanup()`:
 2. **Graceful Container Termination**: Stops and removes all application containers and backing containers.
 3. **Network Cleanup**: Deletes the isolated Docker bridge network.
 
+#### Phase 7: Post-Test Resource Consumption Monitoring
+Regardless of the test outcome (passed, failed, or terminated/interrupted via `SIGINT`/`SIGTERM`), the built-in test runner (`cmd/test-runner`) displays a comprehensive resource consumption report:
+* **Test Duration**: High-precision wall-clock runtime.
+* **Host Runner (Go Test)**: Peak Resident Set Size (RSS), user/sys CPU time, and average CPU utilization across cores.
+* **Containers (Podman)**: Peak aggregate and per-container memory usage, peak CPU %, concurrent PIDs, and cumulative Network & Block I/O.
+* **Disk & Storage Delta**: Container layers & volume usage changes, host workspace artifact deltas, and host disk free space changes.
+* **Status & Exit Code**: Preserves the original process exit code for CI/CD compatibility.
+
 ---
 
 ## Extending Test Scenarios
@@ -509,16 +517,16 @@ test-<scenario-name>:
 | `make build-image SERVICE=<svc>` | Build a specific service container image (e.g. `SERVICE=sort-mistake`) |
 | `make build-sort-mistake` | Shortcut to build only the `sort-mistake` container image |
 | `make build-sort-service` | Shortcut to build only the `sort-service` container image |
-| `make test` | Run all integration test suites (`SUITE=...`, `RUN=...`, `TIMEOUT=...`) |
+| `make test` | Run all integration test suites with resource monitoring (`SUITE=...`, `RUN=...`, `TIMEOUT=...`) |
 | `make test SUITE=<path>` | Run a specific scenario or sub-package (e.g. `SUITE=sort-mistake/intra_node`) |
 | `make test RUN=<pattern>` | Filter specific tests by regex (e.g. `RUN=TestSortTaskPipeline`) |
 | `make test-sort-mistake` | Shortcut for `make test SUITE=sort-mistake TIMEOUT=10m` |
 | `make test-intra-node` | Shortcut for `make test SUITE=sort-mistake/intra_node TIMEOUT=5m` |
-| `make test-report` | Run test suites and generate JUnit XML report (`reports/junit.xml`) |
+| `make test-report` | Run test suites and generate JUnit XML report (`reports/junit.xml`) with resource monitoring |
 | `make prune-containers` | Safely stop and remove all managed test containers (`label=harness.managed=true`) |
 | `make prune-images` | Safely prune dangling/intermediate build images |
 | `make proto-gen` | Recompile `.proto` definitions into Go code |
-| `make clean` | Prune test containers, remove dangling build images, and delete test reports |
+| `make clean` | Prune test containers, remove dangling build images, and delete test reports & binaries |
 
 ---
 

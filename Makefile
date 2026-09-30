@@ -98,9 +98,13 @@ else
   TEST_TARGET := $(if $(filter %/...,$(SUITE)),./suites/$(SUITE),./suites/$(SUITE)/...)
 endif
 
-test:
+bin/test-runner: cmd/test-runner/*.go
+	@mkdir -p bin
+	@go build -o bin/test-runner ./cmd/test-runner
+
+test: bin/test-runner
 	@echo "Running integration tests [target: $(TEST_TARGET)] [timeout: $(TIMEOUT)]$(if $(RUN), [filter: $(RUN)])..."
-	go test -p 1 -v -timeout $(TIMEOUT) $(if $(RUN),-run '$(RUN)') $(TEST_TARGET)
+	@./bin/test-runner go test -p 1 -v -timeout $(TIMEOUT) $(if $(RUN),-run '$(RUN)') $(TEST_TARGET)
 
 test-sort-mistake:
 	@$(MAKE) test SUITE=sort-mistake TIMEOUT=10m
@@ -108,11 +112,11 @@ test-sort-mistake:
 test-intra-node:
 	@$(MAKE) test SUITE=sort-mistake/intra_node TIMEOUT=5m
 
-test-report:
+test-report: bin/test-runner
 	@mkdir -p reports
 	@which gotestsum >/dev/null 2>&1 || (echo "Installing gotestsum..." && go install gotest.tools/gotestsum@latest)
 	@echo "Running tests with gotestsum [target: $(TEST_TARGET)]..."
-	gotestsum --junitfile reports/junit.xml --format pkgname -- -p 1 -timeout $(TIMEOUT) $(if $(RUN),-run '$(RUN)') $(TEST_TARGET)
+	@./bin/test-runner gotestsum --junitfile reports/junit.xml --format pkgname -- -p 1 -timeout $(TIMEOUT) $(if $(RUN),-run '$(RUN)') $(TEST_TARGET)
 	@echo "Report generated at reports/junit.xml"
 
 prune-images:
@@ -137,4 +141,4 @@ pull-images:
 	@PODMAN_BIN="$(PODMAN_BIN)" go run ./cmd/pull-images
 
 clean: prune-containers prune-images
-	rm -rf reports/
+	rm -rf reports/ bin/
